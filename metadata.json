@@ -1,0 +1,5 @@
+{
+  "name": "WA Viewer Pro",
+  "description": "A modern, high-performance viewer for WhatsApp msgstore.db files with search, date grouping, and a clean interface.",
+  "requestFramePermissions": []
+}
