@@ -119,7 +119,10 @@ export const KeyEntryModal: React.FC<KeyEntryModalProps> = ({ onKeySubmit, onCan
                 </div>
 
                 {error && (
-                    <div className="mt-4 text-sm text-red-600 bg-red-50 p-3 rounded border border-red-200">
+                    <div className={`mt-4 text-sm p-3 rounded border ${error.includes('Decrypting') || error.includes('Please wait') || error.includes('Deriving') || error.includes('Decompressing') || error.includes('Parsing') || error.includes('Initializing')
+                            ? 'text-blue-700 bg-blue-50 border-blue-200'
+                            : 'text-red-600 bg-red-50 border-red-200'
+                        }`}>
                         {error}
                     </div>
                 )}

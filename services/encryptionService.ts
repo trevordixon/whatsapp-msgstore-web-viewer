@@ -1,5 +1,4 @@
-import pako from 'pako';
-import forge from 'node-forge';
+
 
 export type EncryptionType = 'crypt12' | 'crypt14' | 'crypt15';
 
@@ -10,23 +9,7 @@ interface EncryptionParams {
     dbStartOffset: number;
 }
 
-const CRYPT_CONFIG: Record<EncryptionType, EncryptionParams> = {
-    'crypt12': {
-        ivOffset: 51,
-        ivLength: 16,
-        dbStartOffset: 67
-    },
-    'crypt14': {
-        ivOffset: 67,
-        ivLength: 16,
-        dbStartOffset: 190
-    },
-    'crypt15': {
-        ivOffset: 8,
-        ivLength: 16,
-        dbStartOffset: 122
-    }
-};
+
 
 export const detectEncryptionType = (buffer: ArrayBuffer, fileName?: string): EncryptionType | null => {
     // Basic heuristic based on filename or checking simple markers
@@ -117,229 +100,41 @@ export const extractKey = async (keyFileBuffer: ArrayBuffer): Promise<{ cryptoKe
     return { cryptoKey, raw: keyData! };
 };
 
-// ... (helper)
-// Helper to avoid Buffer in browser
-const toBinaryString = (bytes: Uint8Array): string => {
-    let binary = '';
-    const len = bytes.byteLength;
-    // Chunking to avoid stack overflow with String.fromCharCode.apply if large
-    // But for keys/IVs (small), simple loop is fine. 
-    // For data, we shouldn't convert to binary string if avoidable, or use limit.
-    // Forge createBuffer accepts Uint8Array directly.
-    for (let i = 0; i < len; i++) {
-        binary += String.fromCharCode(bytes[i]);
-    }
-    return binary;
-};
-
-// HELPER: Key Derivation for Crypt15
-const deriveCrypt15Key = (rootKey: Uint8Array): Uint8Array => {
-    // Algo:
-    // 1. PrivateKey = HMAC-SHA256(Key=32_NULL, Msg=RootKey)
-    // 2. FinalKey = HMAC-SHA256(Key=PrivateKey, Msg="backup encryption" || 0x01)
-
-    // Step A
-    const nullSeed = new Uint8Array(32); // 32 nulls
-    const hmacA = forge.hmac.create();
-    hmacA.start('sha256', forge.util.createBuffer(nullSeed)); // Key (Uint8Array works?)
-    // Forge expects string key usually. If we pass buffer object?
-    // Docs: "key: string key".
-    // So we MUST convert key to binary string.
-    hmacA.start('sha256', toBinaryString(nullSeed));
-
-    hmacA.update(toBinaryString(rootKey));
-    const privateKey = hmacA.digest().getBytes(); // Binary string
-
-    // Step B
-    const message = "backup encryption";
-    const suffix = String.fromCharCode(0x01);
-    const hmacB = forge.hmac.create();
-    hmacB.start('sha256', privateKey); // privateKey is already binary string
-    hmacB.update(message + suffix);
-    const finalKey = hmacB.digest().getBytes(); // Binary String
-
-    // Convert binary string to Uint8Array
-    const len = finalKey.length;
-    const arr = new Uint8Array(len);
-    for (let i = 0; i < len; i++) arr[i] = finalKey.charCodeAt(i);
-    return arr;
-};
-
-
-export const decryptDatabase = async (
+// Worker Wrapper
+export const decryptDatabase = (
     encryptedBuffer: ArrayBuffer,
     key: CryptoKey,
     type: EncryptionType,
-    rawKeyBytes?: Uint8Array
+    rawKeyBytes?: Uint8Array,
+    onProgress?: (status: string) => void
 ): Promise<ArrayBuffer> => {
+    return new Promise((resolve, reject) => {
+        const worker = new Worker(new URL('../src/workers/decryption.worker.ts', import.meta.url), { type: 'module' });
 
-    let workingKeyBytes: string;
-
-    if (type === 'crypt15') {
-        if (!rawKeyBytes) throw new Error("Crypt15 requires raw key bytes for derivation");
-        const derivedKey = deriveCrypt15Key(rawKeyBytes);
-        workingKeyBytes = toBinaryString(derivedKey);
-    } else {
-        if (rawKeyBytes) {
-            workingKeyBytes = toBinaryString(rawKeyBytes);
-        } else {
-            const exported = await window.crypto.subtle.exportKey('raw', key);
-            workingKeyBytes = toBinaryString(new Uint8Array(exported));
-        }
-    }
-
-    const config = CRYPT_CONFIG[type];
-    const view = new Uint8Array(encryptedBuffer);
-
-    let iv: string;
-    let ciphertext: Uint8Array<ArrayBuffer>;
-
-    if (type === 'crypt15') {
-        const viewData = new DataView(encryptedBuffer);
-        let offset = 0;
-
-        // 1. Header Size
-        const protobufSize = viewData.getUint8(offset);
-        offset++;
-
-        // 2. Feature Flag Check
-        const flagByte = viewData.getUint8(offset);
-        if (flagByte === 1) offset++;
-
-        const protobufStart = offset;
-        const protobufEnd = offset + protobufSize;
-        const protobufBuffer = new Uint8Array(encryptedBuffer).slice(protobufStart, protobufEnd);
-
-        // 3. Parse Protobuf
-        let pbOffset = 0;
-        const pbView = new DataView(protobufBuffer.buffer);
-        let foundIV: Uint8Array | null = null;
-
-        const readVarint = () => {
-            let tag = 0;
-            let shift = 0;
-            while (true) {
-                if (pbOffset >= protobufBuffer.byteLength) throw new Error("EOF");
-                const b = pbView.getUint8(pbOffset);
-                pbOffset++;
-                tag |= (b & 0x7F) << shift;
-                if ((b & 0x80) === 0) break;
-                shift += 7;
+        worker.onmessage = (e) => {
+            const { type, status, buffer, message } = e.data;
+            if (type === 'progress') {
+                if (onProgress) onProgress(status);
+            } else if (type === 'complete') {
+                resolve(buffer);
+                worker.terminate();
+            } else if (type === 'error') {
+                reject(new Error(message));
+                worker.terminate();
             }
-            return tag;
         };
 
-        try {
-            while (pbOffset < protobufBuffer.byteLength) {
-                const tag = readVarint();
-                const wireType = tag & 0x07;
-                const fieldNum = tag >>> 3;
+        worker.onerror = (err) => {
+            reject(new Error("Worker Error: " + err.message));
+            worker.terminate();
+        };
 
-                if (wireType === 2) {
-                    const len = readVarint();
-                    const payload = new Uint8Array(protobufBuffer.slice(pbOffset, pbOffset + len));
-                    if (fieldNum === 3) { // c15_iv
-                        let subOffset = 0;
-                        const subView = new DataView(payload.buffer);
-                        while (subOffset < payload.byteLength) {
-                            let sTag = 0; let sShift = 0;
-                            while (true) {
-                                const b = subView.getUint8(subOffset); subOffset++;
-                                sTag |= (b & 0x7F) << sShift;
-                                if ((b & 0x80) === 0) break;
-                                sShift += 7;
-                            }
-                            const sWire = sTag & 0x07;
-                            const sField = sTag >>> 3;
-                            if (sField === 1 && sWire === 2) {
-                                let sLen = 0; let slShift = 0;
-                                while (true) {
-                                    const b = subView.getUint8(subOffset); subOffset++;
-                                    sLen |= (b & 0x7F) << slShift;
-                                    if ((b & 0x80) === 0) break;
-                                    slShift += 7;
-                                }
-                                if (sLen === 16) foundIV = new Uint8Array(payload.slice(subOffset, subOffset + 16));
-                                subOffset += sLen;
-                            } else {
-                                if (sWire === 2) {
-                                    let sLen = 0; let slShift = 0;
-                                    while (true) {
-                                        const b = subView.getUint8(subOffset); subOffset++;
-                                        sLen |= (b & 0x7F) << slShift;
-                                        if ((b & 0x80) === 0) break;
-                                        slShift += 7;
-                                    }
-                                    subOffset += sLen;
-                                } else break;
-                            }
-                        }
-                    }
-                    pbOffset += len;
-                } else if (wireType === 0) while ((pbView.getUint8(pbOffset++) & 0x80) !== 0);
-                else if (wireType === 1) pbOffset += 8;
-                else if (wireType === 5) pbOffset += 4;
-                else break;
-            }
-        } catch (e) { console.warn("Protobuf parse warning:", e); }
-
-        if (foundIV) {
-            iv = toBinaryString(foundIV);
-        } else {
-            iv = toBinaryString(view.slice(8, 24));
-        }
-
-        const tagStart = view.byteLength - 32;
-        ciphertext = view.slice(protobufEnd, tagStart);
-        const tag = view.slice(tagStart, view.byteLength - 16);
-
-        const decipher = forge.cipher.createDecipher('AES-GCM', workingKeyBytes);
-        decipher.start({
-            iv: iv,
-            tag: forge.util.createBuffer(tag.buffer),
-            tagLength: 128
-        });
-        decipher.update(forge.util.createBuffer(ciphertext.buffer));
-
-        const success = decipher.finish();
-        if (!success) throw new Error("Decryption failed (Forge Auth Mismatch)");
-
-        const decryptedBytes = decipher.output.getBytes();
-        const arr = new Uint8Array(decryptedBytes.length);
-        for (let i = 0; i < decryptedBytes.length; i++) arr[i] = decryptedBytes.charCodeAt(i);
-
-        try {
-            return pako.inflate(arr).buffer;
-        } catch (e) {
-            console.warn("Decompression failed", e);
-            throw new Error("Decompression failed (Invalid Zlib data)");
-        }
-
-    } else {
-        // Crypt12/14 Logic reused
-        const rawIv = view.slice(config.ivOffset, config.ivOffset + config.ivLength);
-        iv = toBinaryString(rawIv);
-
-        if (type === 'crypt14') {
-            ciphertext = view.slice(config.dbStartOffset);
-        } else {
-            ciphertext = view.slice(config.dbStartOffset, view.length - 20);
-        }
-
-        const decipher = forge.cipher.createDecipher('AES-GCM', workingKeyBytes);
-        decipher.start({ iv: iv });
-        decipher.update(forge.util.createBuffer(ciphertext.buffer));
-        decipher.finish(); // Check pass?
-
-        const decryptedBytes = decipher.output.getBytes();
-        const arr = new Uint8Array(decryptedBytes.length);
-        for (let i = 0; i < decryptedBytes.length; i++) arr[i] = decryptedBytes.charCodeAt(i);
-
-        try {
-            return pako.inflate(arr).buffer;
-        } catch (e) {
-            console.warn("Decompression failed (fallback raw)", e);
-            return arr.buffer;
-        }
-    }
+        // Send data
+        worker.postMessage({
+            fileBuffer: encryptedBuffer,
+            keyBuffer: null,
+            encryptionType: type,
+            rawKeyBytes: rawKeyBytes
+        }, [encryptedBuffer]);
+    });
 };

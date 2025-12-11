@@ -20,6 +20,7 @@ const App: React.FC = () => {
   const [encryptionType, setEncryptionType] = useState<EncryptionType | null>(null);
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [isDecrypting, setIsDecrypting] = useState(false);
+  const [progressStatus, setProgressStatus] = useState("Decrypting...");
 
   // Settings
   const [maxChats, setMaxChats] = useState(1000);
@@ -85,9 +86,19 @@ const App: React.FC = () => {
 
       // 2. Decrypt Database
       const dbBuffer = await pendingFile.arrayBuffer();
-      const decryptedBuffer = await decryptDatabase(dbBuffer, cryptoKey, encryptionType, raw);
+      const decryptedBuffer = await decryptDatabase(
+        dbBuffer,
+        cryptoKey,
+        encryptionType,
+        raw,
+        (status) => setProgressStatus(status)
+      );
 
       // 3. Init Database
+      setProgressStatus("Initializing Database...");
+      // Small timeout to allow UI to render the status change before main thread blocks again for init
+      await new Promise(r => setTimeout(r, 10));
+
       await initDatabase(decryptedBuffer);
       setDbLoaded(true);
       loadChats(maxChats);
@@ -208,7 +219,7 @@ const App: React.FC = () => {
             <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
               <div className="bg-white p-6 rounded-xl flex items-center space-x-4">
                 <Loader className="animate-spin text-green-600" />
-                <span className="font-medium text-gray-700">Decrypting database... This may take a moment.</span>
+                <span className="font-medium text-gray-700">{progressStatus}</span>
               </div>
             </div>
           )
