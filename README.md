@@ -1,6 +1,6 @@
 # WhatsApp Msgstore Web Viewer
 
-A modern, high-performance web viewer for unencrypted WhatsApp `msgstore.db` files. Built with **React**, **Vite**, and **SQL.js**.
+A modern, high-performance web viewer for WhatsApp `msgstore.db` files. Built with **React**, **Vite**, and **SQL.js**.
 
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Open%20App-25D366?style=for-the-badge&logo=whatsapp&logoColor=white)](https://trevordixon.github.io/whatsapp-msgstore-web-viewer/)
 
@@ -22,13 +22,29 @@ This application runs entirely in your browser. The database file is processed l
 
 ## 🚀 How to Use
 
-1.  **Obtain your database:** You need an *unencrypted* `msgstore.db` file.
-    *   *Note: Standard backups found in Android/WhatsApp/Databases are usually encrypted (e.g., `msgstore.db.crypt14`). This viewer currently only supports unencrypted SQLite files.*
+1.  **Obtain your database:** You need a `msgstore.db` file (encrypted or unencrypted).
+    *   *Note: Standard backups found in Android/WhatsApp/Databases are usually encrypted (e.g., `msgstore.db.crypt14`).*
 2.  **Open the App:** Go to the [Live Demo](https://trevordixon.github.io/whatsapp-msgstore-web-viewer/).
 3.  **Upload:** Click the upload box and select your `.db` file.
 4.  **Browse:** Select a chat from the sidebar to view history.
 
-## 📸 Screenshots
+## � Encrypted Databases (New!)
+
+We now support opening encrypted WhatsApp databases directly.
+
+*   **Supported Formats:** `.crypt15` (Verified), `.crypt14`, `.crypt12`
+*   **Requirements:**
+    1.  The encrypted file (e.g., `msgstore.db.crypt15`)
+    2.  The decryption key (e.g., `encrypted_backup.key`) **OR** your 64-character hex recovery key.
+*   **Where to find the key:** 
+    *   **Rooted Android:** `/data/data/com.whatsapp/files/key`
+    *   **Encrypted Backups:** Using tools/scripts to extract the 64-digit hex key.
+*   **How to use:** Upload your `.crypt` file, and when prompted, simply drag & drop your key file or paste the hex string.
+
+> **Note:** Decryption is typically verified on `crypt15` files. Older formats may work but are heuristic-based.
+
+
+## �📸 Screenshots
 
 <p align="center">
   <img src="https://github.com/user-attachments/assets/a2f878a2-e34d-47da-8a34-54f9b48b073a" alt="Landing Page" width="45%">
