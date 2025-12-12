@@ -1,6 +1,6 @@
 # WhatsApp Msgstore Web Viewer
 
-A modern, high-performance web viewer for WhatsApp `msgstore.db` files. Built with **React**, **Vite**, and **SQL.js**.
+A modern, high-performance web viewer for WhatsApp `msgstore.db` (and `msgstore.db.crypt15`) files.
 
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Open%20App-25D366?style=for-the-badge&logo=whatsapp&logoColor=white)](https://trevordixon.github.io/whatsapp-msgstore-web-viewer/)
 
@@ -28,7 +28,7 @@ This application runs entirely in your browser. The database file is processed l
 3.  **Upload:** Click the upload box and select your `.db` file.
 4.  **Browse:** Select a chat from the sidebar to view history.
 
-## � Encrypted Databases (New!)
+## Encrypted Databases (New!)
 
 We now support opening encrypted WhatsApp databases directly.
 
@@ -38,13 +38,13 @@ We now support opening encrypted WhatsApp databases directly.
     2.  The decryption key (e.g., `encrypted_backup.key`) **OR** your 64-character hex recovery key.
 *   **Where to find the key:** 
     *   **Rooted Android:** `/data/data/com.whatsapp/files/key`
-    *   **Encrypted Backups:** Using tools/scripts to extract the 64-digit hex key.
-*   **How to use:** Upload your `.crypt` file, and when prompted, simply drag & drop your key file or paste the hex string.
+    *   **E2E-Encrypted Backups:** Use your 64-digit hex key.
+*   **How to use:** Upload your `.crypt15` file, and when prompted, simply drag & drop your key file or paste the hex string.
 
 > **Note:** Decryption is typically verified on `crypt15` files. Older formats may work but are heuristic-based.
 
 
-## �📸 Screenshots
+## 📸 Screenshots
 
 <p align="center">
   <img src="https://github.com/user-attachments/assets/a2f878a2-e34d-47da-8a34-54f9b48b073a" alt="Landing Page" width="45%">
