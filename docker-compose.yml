@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  wa-viewer:
+    build:
+      context: .
+    # Enforce linux/amd64 architecture to ensure compatibility with NAS devices
+    # even if built on ARM-based machines (like Apple Silicon or Surface Pro X)
+    platform: linux/amd64
+    # Uncomment the line below if building/running locally on Mac (Apple Silicon) and comment out the above line
+    # platform: linux/arm64
+    container_name: whatsapp-msgstore-web-viewer
+    # Automatically restart the container if it crashes or the server reboots
+    restart: unless-stopped
+    ports:
+      # Maps port 8080 on your device to port 80 inside the container
+      - "8080:80"

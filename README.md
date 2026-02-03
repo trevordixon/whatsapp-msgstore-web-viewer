@@ -77,6 +77,38 @@ Pull requests are welcome! If you want to contribute or run this on your own mac
     npm run build
     ```
 
+## Running with Docker
+
+You can also run this application using Docker (e.g., on a NAS or server).
+
+1.  **Build and Run**
+    ```bash
+    docker compose up -d --build
+    ```
+
+2.  **Access the App**
+    Open `http://localhost:8080` in your browser.
+
+### Manual Build
+
+If you prefer to build the image manually without Docker Compose:
+
+1.  **Build the image**
+    ```bash
+    docker build -t whatsapp-msgstore-web-viewer .
+    ```
+
+2.  **Run the container**
+    ```bash
+    docker run -d -p 8080:80 --name whatsapp-msgstore-web-viewer whatsapp-msgstore-web-viewer
+    ```
+
+### Using Pre-built Image
+
+You can also pull the pre-built image from the GitHub Container Registry:
+
+    docker run -d -p 8080:80 ghcr.io/siddharthsbhadauria/whatsapp-msgstore-web-viewer:main
+
 ## License
 
 Open source. Feel free to fork and improve!
