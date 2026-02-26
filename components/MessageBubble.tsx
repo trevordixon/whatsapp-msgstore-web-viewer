@@ -1,13 +1,54 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Message } from '../types';
 import { Check, Image as ImageIcon } from 'lucide-react';
 
 interface MessageBubbleProps {
   message: Message;
+  mediaServerUrl: string;
 }
 
-export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
+const buildMediaUrl = (baseUrl: string, filePath: string) => {
+  const normalizedBase = baseUrl.trim().replace(/\/+$/, '');
+  if (!normalizedBase) return null;
+
+  const encodedPath = filePath
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+
+  return encodedPath ? `${normalizedBase}/${encodedPath}` : null;
+};
+
+export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mediaServerUrl }) => {
   const isSent = message.from_me;
+  const mediaFilePath = message.media_file_path || message.media_file_name || 'arquivo-desconhecido';
+  const mediaFileName = message.media_file_name || message.media_file_path || 'arquivo-desconhecido';
+  const downloadFileName =
+    message.media_file_name ||
+    (message.media_file_path ? message.media_file_path.split('/').pop() || 'arquivo-desconhecido' : 'arquivo-desconhecido');
+  const mediaTypeLabel = message.media_type_label || 'Desconhecido';
+  const mediaMime = message.media_mime || 'unknown/unknown';
+  const showMediaMetadata = Boolean(
+    message.has_media ||
+    message.media_file_name ||
+    message.media_file_path ||
+    message.media_mime ||
+    message.media_type_label
+  );
+  const canPreviewMediaKind =
+    message.media_kind === 'image' || message.media_kind === 'video' || message.media_kind === 'audio';
+  const mediaUrl = useMemo(
+    () => (message.media_file_path ? buildMediaUrl(mediaServerUrl, message.media_file_path) : null),
+    [mediaServerUrl, message.media_file_path]
+  );
+  const [previewError, setPreviewError] = useState(false);
+  const showMediaPreview = showMediaMetadata && canPreviewMediaKind && Boolean(mediaUrl) && !previewError;
+  const canDownloadNonPreviewMedia = showMediaMetadata && !canPreviewMediaKind && Boolean(mediaUrl);
+
+  useEffect(() => {
+    setPreviewError(false);
+  }, [mediaUrl]);
 
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -44,13 +85,87 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
         )}
 
         {/* Content */}
-        <div className="text-gray-900 px-1 leading-relaxed whitespace-pre-wrap break-words min-w-0 w-full" style={{ wordBreak: 'break-word' }}>
+        <div className="text-gray-900 px-1 leading-relaxed min-w-0 w-full" style={{ wordBreak: 'break-word' }}>
           {message.text_data ? (
-            message.text_data
-          ) : (
+            <div className="whitespace-pre-wrap break-words">
+              {message.text_data}
+            </div>
+          ) : showMediaMetadata ? (
             <div className="flex items-center text-gray-500 italic py-1">
               <ImageIcon size={16} className="mr-2" />
               <span>Media omitted</span>
+            </div>
+          ) : (
+            <div className="text-gray-500 italic py-1">
+              Mensagem sem conteudo
+            </div>
+          )}
+
+          {showMediaMetadata && (
+            <div className={`${message.text_data ? 'mt-2' : 'mt-1'} rounded-md bg-black/5 px-2 py-1.5 text-xs break-all`}>
+              <div>
+                <span className="font-semibold text-gray-600">Arquivo:</span>{' '}
+                <span className="text-gray-700">{mediaFilePath}</span>
+              </div>
+              <div className="mt-1">
+                <span className="font-semibold text-gray-600">Tipo:</span>{' '}
+                <span className="text-gray-700">{`${mediaTypeLabel} (${mediaMime})`}</span>
+              </div>
+              {showMediaPreview && mediaUrl && (
+                <div className="mt-2">
+                  <span className="font-semibold text-gray-600">Conteudo:</span>
+                  <div className="mt-1">
+                    {message.media_kind === 'image' && (
+                      <img
+                        src={mediaUrl}
+                        alt={mediaFileName}
+                        loading="lazy"
+                        onError={() => setPreviewError(true)}
+                        className="max-h-64 w-auto max-w-full rounded border border-gray-200 bg-white"
+                      />
+                    )}
+                    {message.media_kind === 'video' && (
+                      <video
+                        src={mediaUrl}
+                        controls
+                        preload="metadata"
+                        onError={() => setPreviewError(true)}
+                        className="max-h-64 w-full rounded border border-gray-200 bg-black"
+                      />
+                    )}
+                    {message.media_kind === 'audio' && (
+                      <audio
+                        src={mediaUrl}
+                        controls
+                        preload="metadata"
+                        onError={() => setPreviewError(true)}
+                        className="w-full"
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
+              {!showMediaPreview && canPreviewMediaKind && mediaUrl && (
+                <div className="mt-2 text-[11px] text-amber-700">
+                  Conteudo indisponivel nesta URL.
+                </div>
+              )}
+              {canDownloadNonPreviewMedia && mediaUrl && (
+                <div className="mt-2">
+                  <span className="font-semibold text-gray-600">Conteudo:</span>
+                  <div className="mt-1">
+                    <a
+                      href={mediaUrl}
+                      download={downloadFileName}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center px-2.5 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+                    >
+                      Baixar arquivo
+                    </a>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

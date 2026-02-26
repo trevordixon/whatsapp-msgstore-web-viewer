@@ -7,6 +7,31 @@ import { Database, Upload, AlertCircle, Download, Key, Loader } from 'lucide-rea
 import { detectEncryptionType, extractKey, decryptDatabase, EncryptionType } from './services/encryptionService';
 import { KeyEntryModal } from './components/KeyEntryModal';
 
+const defaultDbPrimaryEntries = import.meta.glob('./db/Databases/msgstore.db', {
+  eager: true,
+  query: '?url',
+  import: 'default',
+}) as Record<string, string>;
+const defaultDbLegacyEntries = import.meta.glob('./db/msgstore.db', {
+  eager: true,
+  query: '?url',
+  import: 'default',
+}) as Record<string, string>;
+
+const localDbCandidates = [
+  { path: 'db/Databases/msgstore.db', url: Object.values(defaultDbPrimaryEntries)[0] ?? null },
+  { path: 'db/msgstore.db', url: Object.values(defaultDbLegacyEntries)[0] ?? null },
+];
+
+const hasBundledDbCandidate = localDbCandidates.some((candidate) => Boolean(candidate.url));
+const MEDIA_SERVER_URL_STORAGE_KEY = 'wa-viewer-media-server-url';
+const DEFAULT_MEDIA_SERVER_URL = 'http://127.0.0.1:8081';
+
+const getInitialMediaServerUrl = () => {
+  if (typeof window === 'undefined') return '';
+  return window.localStorage.getItem(MEDIA_SERVER_URL_STORAGE_KEY) ?? DEFAULT_MEDIA_SERVER_URL;
+};
+
 const App: React.FC = () => {
   const [dbLoaded, setDbLoaded] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -21,6 +46,12 @@ const App: React.FC = () => {
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [isDecrypting, setIsDecrypting] = useState(false);
   const [progressStatus, setProgressStatus] = useState("Decrypting...");
+  const [mediaServerUrl, setMediaServerUrl] = useState(getInitialMediaServerUrl);
+  const [hasLocalDbInFolder, setHasLocalDbInFolder] = useState(false);
+  const [isCheckingLocalDb, setIsCheckingLocalDb] = useState(hasBundledDbCandidate);
+  const [isOpeningLocalDb, setIsOpeningLocalDb] = useState(false);
+  const [localDbAssetUrl, setLocalDbAssetUrl] = useState<string | null>(null);
+  const [localDbRelativePath, setLocalDbRelativePath] = useState<string>('db/Databases/msgstore.db');
 
   // Settings
   const [maxChats, setMaxChats] = useState(1000);
@@ -62,6 +93,38 @@ const App: React.FC = () => {
     const file = event.target.files?.[0];
     if (!file) return;
     await processFile(file);
+  };
+
+  const openLocalDatabaseFromDbFolder = async () => {
+    if (!localDbAssetUrl) return;
+
+    setIsOpeningLocalDb(true);
+    setError(null);
+    setPendingFile(null);
+    setEncryptionType(null);
+    setShowKeyModal(false);
+
+    try {
+      const response = await fetch(localDbAssetUrl, { cache: 'no-store' });
+      if (!response.ok) {
+        throw new Error(`Unable to fetch ${localDbRelativePath}`);
+      }
+
+      const buffer = await response.arrayBuffer();
+      if (buffer.byteLength === 0) {
+        throw new Error(`${localDbRelativePath} is empty`);
+      }
+
+      await initDatabase(buffer);
+      setDbLoaded(true);
+      loadChats(maxChats);
+    } catch (err) {
+      console.error(err);
+      setError(`Failed to load ${localDbRelativePath} from the local db folder.`);
+      setDbLoaded(false);
+    } finally {
+      setIsOpeningLocalDb(false);
+    }
   };
 
 
@@ -141,6 +204,71 @@ const App: React.FC = () => {
     }, 10);
   };
 
+  // Persist media server URL for future media rendering flows
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const trimmed = mediaServerUrl.trim();
+    if (trimmed) {
+      window.localStorage.setItem(MEDIA_SERVER_URL_STORAGE_KEY, trimmed);
+    } else {
+      window.localStorage.removeItem(MEDIA_SERVER_URL_STORAGE_KEY);
+    }
+  }, [mediaServerUrl]);
+
+  // Detect local bundled DB availability without auto-opening it
+  useEffect(() => {
+    let isCancelled = false;
+
+    const detectLocalDb = async () => {
+      try {
+        if (!hasBundledDbCandidate) {
+          setHasLocalDbInFolder(false);
+          setLocalDbAssetUrl(null);
+          setLocalDbRelativePath('db/Databases/msgstore.db');
+          return;
+        }
+
+        for (const candidate of localDbCandidates) {
+          if (!candidate.url) continue;
+          const response = await fetch(candidate.url, { cache: 'no-store' });
+          if (!response.ok) continue;
+
+          const buffer = await response.arrayBuffer();
+          if (buffer.byteLength > 0) {
+            if (!isCancelled) {
+              setHasLocalDbInFolder(true);
+              setLocalDbAssetUrl(candidate.url);
+              setLocalDbRelativePath(candidate.path);
+            }
+            return;
+          }
+        }
+
+        if (!isCancelled) {
+          setHasLocalDbInFolder(false);
+          setLocalDbAssetUrl(null);
+          setLocalDbRelativePath('db/Databases/msgstore.db');
+        }
+      } catch {
+        if (!isCancelled) {
+          setHasLocalDbInFolder(false);
+          setLocalDbAssetUrl(null);
+          setLocalDbRelativePath('db/Databases/msgstore.db');
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsCheckingLocalDb(false);
+        }
+      }
+    };
+
+    detectLocalDb();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
   // Reload chats if settings change and DB is loaded
   useEffect(() => {
     if (dbLoaded) {
@@ -167,6 +295,54 @@ const App: React.FC = () => {
             Open your <code>msgstore.db</code> file to view chats, messages, and history in a clean interface.
             <br /><span className="text-xs text-gray-400 mt-2 block">(No data is uploaded. Everything is processed locally in your browser.)</span>
           </p>
+
+          <div className="mb-4 text-left">
+            <label htmlFor="media-server-url" className="block text-xs font-semibold text-gray-600 mb-2">
+              Media Server URL (optional)
+            </label>
+            <input
+              id="media-server-url"
+              type="url"
+              value={mediaServerUrl}
+              onChange={(e) => setMediaServerUrl(e.target.value)}
+              placeholder={DEFAULT_MEDIA_SERVER_URL}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              This URL is saved locally and will be used when media preview by URL is enabled.
+            </p>
+          </div>
+
+          <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200 text-left">
+            <p className="text-xs font-semibold text-gray-600 mb-2">
+              Local DB folder (<code>{localDbRelativePath}</code>)
+            </p>
+            {isCheckingLocalDb ? (
+              <div className="inline-flex items-center text-sm text-gray-600">
+                <Loader size={16} className="mr-2 animate-spin text-green-600" />
+                Looking for local database...
+              </div>
+            ) : hasLocalDbInFolder ? (
+              <button
+                onClick={openLocalDatabaseFromDbFolder}
+                disabled={isOpeningLocalDb}
+                className="inline-flex items-center px-3 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {isOpeningLocalDb ? (
+                  <>
+                    <Loader size={16} className="mr-2 animate-spin" />
+                    Opening {localDbRelativePath}...
+                  </>
+                ) : (
+                  `Open ${localDbRelativePath}`
+                )}
+              </button>
+            ) : (
+              <p className="text-sm text-gray-500">
+                No valid local DB found (expected <code>db/Databases/msgstore.db</code>).
+              </p>
+            )}
+          </div>
 
           <label className="block w-full cursor-pointer group">
             <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 hover:border-green-500 hover:bg-green-50 transition-all flex flex-col items-center">
@@ -237,6 +413,12 @@ const App: React.FC = () => {
           <span>WA Viewer Pro</span>
         </div>
 
+        {mediaServerUrl && (
+          <div className="hidden md:block text-[11px] text-gray-500 truncate max-w-[360px]" title={mediaServerUrl}>
+            Media server: {mediaServerUrl}
+          </div>
+        )}
+
         <div className="flex items-center space-x-4 text-xs">
           <div className="flex items-center space-x-2">
             <label className="text-gray-500">Max Chats:</label>
@@ -279,6 +461,7 @@ const App: React.FC = () => {
             conversation={selectedChat}
             messages={messages}
             loading={loadingMessages}
+            mediaServerUrl={mediaServerUrl}
           />
           {/* Mobile Back Button Overlay */}
           {selectedChat && (

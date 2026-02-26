@@ -7,6 +7,7 @@ interface ChatWindowProps {
   messages: Message[];
   conversation: Conversation | null;
   loading: boolean;
+  mediaServerUrl: string;
 }
 
 // Helper to group messages by date
@@ -28,7 +29,7 @@ const groupMessagesByDate = (messages: Message[]) => {
   return groups;
 };
 
-export const ChatWindow: React.FC<ChatWindowProps> = ({ messages, conversation, loading }) => {
+export const ChatWindow: React.FC<ChatWindowProps> = ({ messages, conversation, loading, mediaServerUrl }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Auto scroll to bottom when messages change
@@ -103,7 +104,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ messages, conversation, 
                             </span>
                         </div>
                         {msgs.map((msg) => (
-                            <MessageBubble key={msg._id} message={msg} />
+                            <MessageBubble key={msg._id} message={msg} mediaServerUrl={mediaServerUrl} />
                         ))}
                     </div>
                 ))}
