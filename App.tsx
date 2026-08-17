@@ -26,8 +26,6 @@ const App: React.FC = () => {
   const [maxChats, setMaxChats] = useState(1000);
   const [maxMessages, setMaxMessages] = useState(5000);
 
-
-
   const processFile = async (file: File) => {
     setError(null);
     setPendingFile(null);
@@ -58,13 +56,39 @@ const App: React.FC = () => {
     }
   };
 
+  const loadBundledDb = async () => {
+    setError(null);
+    try {
+      const resp = await fetch('/msgstore.db');
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status} - ${resp.statusText}`);
+      }
+      const buffer = await resp.arrayBuffer();
+
+      const detectedType = detectEncryptionType(buffer, 'msgstore.db');
+      if (detectedType) {
+        // Create a File from the buffer so existing encryption flow can handle it
+        const file = new File([buffer], 'msgstore.db');
+        setPendingFile(file);
+        setEncryptionType(detectedType);
+        setShowKeyModal(true);
+        return;
+      }
+
+      await initDatabase(buffer);
+      setDbLoaded(true);
+      loadChats(maxChats);
+    } catch (err: any) {
+      console.error('Failed to load bundled msgstore.db:', err);
+      setError('Failed to fetch bundled msgstore.db: ' + (err.message || err));
+    }
+  };
+
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     await processFile(file);
   };
-
-
 
   const handleKeySubmit = async (keyInput: File | string) => {
     if (!pendingFile || !encryptionType) return;
@@ -155,6 +179,35 @@ const App: React.FC = () => {
     }
   }, [maxMessages]);
 
+  // Attempt to auto-load bundled msgstore.db from the repo on first mount
+  useEffect(() => {
+    const tryAutoLoad = async () => {
+      try {
+        const resp = await fetch('/msgstore.db');
+        if (resp.ok) {
+          const buffer = await resp.arrayBuffer();
+          const detectedType = detectEncryptionType(buffer, 'msgstore.db');
+          if (detectedType) {
+            const file = new File([buffer], 'msgstore.db');
+            setPendingFile(file);
+            setEncryptionType(detectedType);
+            setShowKeyModal(true);
+            return;
+          }
+
+          await initDatabase(buffer);
+          setDbLoaded(true);
+          loadChats(maxChats);
+        }
+      } catch (e) {
+        // ignore - fail silently and let user upload manually
+      }
+    };
+
+    tryAutoLoad();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   if (!dbLoaded) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-green-500 to-teal-600 flex items-center justify-center p-4">
@@ -185,14 +238,24 @@ const App: React.FC = () => {
 
           <div className="mt-6 pt-4 border-t border-gray-100">
             <p className="text-sm text-gray-500 mb-2">Don't have a file?</p>
-            <a
-              href="https://github.com/trevordixon/whatsapp-msgstore-web-viewer/raw/refs/heads/main/msgstore.db"
-              className="inline-flex items-center text-sm text-green-600 hover:text-green-700 font-medium hover:underline"
-              download
-            >
-              <Download size={16} className="mr-1.5" />
-              Download sample msgstore.db
-            </a>
+            <div className="flex items-center justify-center space-x-3">
+              <a
+                href="https://github.com/trevordixon/whatsapp-msgstore-web-viewer/raw/refs/heads/main/msgstore.db"
+                className="inline-flex items-center text-sm text-green-600 hover:text-green-700 font-medium hover:underline"
+                download
+              >
+                <Download size={16} className="mr-1.5" />
+                Download sample msgstore.db
+              </a>
+
+              <button
+                onClick={loadBundledDb}
+                className="inline-flex items-center text-sm text-green-600 hover:text-green-700 font-medium"
+              >
+                <Database size={16} className="mr-1.5" />
+                Load bundled msgstore.db
+              </button>
+            </div>
           </div>
 
           {error && (
@@ -201,7 +264,7 @@ const App: React.FC = () => {
               {error}
             </div>
           )}
-        </div>
+        </div >
 
 
         {
@@ -224,7 +287,7 @@ const App: React.FC = () => {
             </div>
           )
         }
-      </div >
+      </div>
     );
   }
 
